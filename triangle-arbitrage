@@ -1,0 +1,82 @@
+import ccxt
+import json
+import time
+import traceback
+
+#####################################################################################################################
+
+exchange = ccxt.ftx({
+    'apiKey': '',
+    'secret': '',
+    'enableRateLimit': False,
+})
+
+exchange.load_markets()
+
+#####################################################################################################################
+
+
+
+PairA = 'MATIC/BTC'
+PairB = 'BTC/USD'
+PairC = 'MATIC/USD'
+tradingBalance = 5
+market_order_gebuehren = 0 / 100
+
+def checkeArbiMoeglichkeit(alltickers, PairA, PairB, PairC, market_order_gebuehren):
+    try:
+        # Fall1
+        gebuehren = (float(alltickers[PairC]['bid']) + float(alltickers[PairB]['ask']) + float(alltickers[PairA]['ask'])) * market_order_gebuehren
+        umsatz1 = float(alltickers[PairA]['ask'])*float(alltickers[PairB]['ask'])
+        kosten1 = float(alltickers[PairC]['bid']) + gebuehren
+        if umsatz1 > kosten1:
+            welcherFallFunkioniert = 1
+
+        # Fall2
+        gebuehren = (float(alltickers[PairC]['ask']) + float(alltickers[PairB]['bid']) + float(alltickers[PairA]['bid'])) * market_order_gebuehren
+        umsatz2 = float(alltickers[PairC]['ask']) / float(alltickers[PairB]['bid'])
+        kosten2 = float(alltickers[PairA]['bid']) + gebuehren
+        if umsatz2 > kosten2:
+            welcherFallFunkioniert = 2
+
+        if welcherFallFunkioniert != 1 or welcherFallFunkioniert != 2:
+            welcherFallFunkioniert = 0
+            print(str(umsatz1) + " >= " + str(kosten1) + "    " + str(umsatz2) + " >= " + str(kosten2))
+    except Exception:
+        print(traceback.format_exc())
+
+    return welcherFallFunkioniert
+
+
+
+
+
+nichtGekauft = True
+
+while nichtGekauft:
+    try:
+        alltickers = exchange.fetch_tickers()
+    except Exception:
+        print(traceback.format_exc())
+
+    gefundenerFall = checkeArbiMoeglichkeit(alltickers, PairA, PairB, PairC, market_order_gebuehren)
+
+    if gefundenerFall == 1:
+        print(exchange.create_limit_sell_order(PairC, exchange.amount_to_precision(PairC, tradingBalance), float(alltickers[PairC]['bid'])))
+
+        amountPairB = exchange.amount_to_precision(PairB, tradingBalance/float(alltickers[PairC]['bid']))
+        print(exchange.create_limit_buy_order(PairB, amountPairB, float(alltickers[PairB]['ask'])))
+
+        amountPairA = exchange.amount_to_precision(PairA, tradingBalance/float(alltickers[PairC]['bid'])*float(alltickers[PairB]['ask']))
+        print(exchange.create_limit_buy_order(PairA, amountPairA, float(alltickers[PairA]['ask'])))
+        nichtGekauft = False
+
+    if gefundenerFall == 2:
+        print(exchange.create_limit_sell_order(PairA, exchange.amount_to_precision(PairA, tradingBalance), float(alltickers[PairA]['bid'])))
+
+        amountPairB = exchange.amount_to_precision(PairB, tradingBalance/float(alltickers[PairA]['bid']))
+        print(exchange.create_limit_sell_order(PairB, amountPairB, float(alltickers[PairB]['bid'])))
+
+        amountPairC = exchange.amount_to_precision(PairC, tradingBalance/float(alltickers[PairA]['bid'])/float(alltickers[PairB]['bid']))
+        print(exchange.create_limit_buy_order(PairC, amountPairC, float(alltickers[PairC]['ask'])))
+        nichtGekauft = False
