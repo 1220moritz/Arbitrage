@@ -5,9 +5,12 @@ import traceback
 
 #####################################################################################################################
 
-exchange = ccxt.ftx({
-    'apiKey': '',
-    'secret': '',
+f = open('C:/Users/altsg/OneDrive/Desktop/Tobi/ExchangeAPI.json')
+exchangesAPI = json.load(f)['Exchanges']['Kucoin']
+
+exchange = ccxt.kucoin({
+    'apiKey': exchangesAPI['api'],
+    'secret': exchangesAPI['secret'],
     'enableRateLimit': False,
 })
 
@@ -17,9 +20,9 @@ exchange.load_markets()
 
 
 
-PairA = 'MATIC/BTC'
-PairB = 'BTC/USD'
-PairC = 'MATIC/USD'
+PairA = 'ETH/BTC'
+PairB = 'BTC/USDT'
+PairC = 'ETH/USDT'
 tradingBalance = 5
 market_order_gebuehren = 0 / 100
 
