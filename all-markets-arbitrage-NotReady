@@ -1,0 +1,126 @@
+import ccxt
+import json
+import time
+import traceback
+
+
+tradingBalance = 5
+market_order_gebuehren = 0 / 100
+
+
+#exchange inzialisieren
+#####################################################################################################################
+#####################################################################################################################
+
+f = open('C:/Users/altsg/OneDrive/Desktop/Tobi/ExchangeAPI.json')
+exchangesAPI = json.load(f)['Exchanges']['Kucoin']
+
+exchange = ccxt.kucoin({
+    'apiKey': exchangesAPI['api'],      #ExchangeAPI.json verwenden oder einfach 'apiKey': 'deinKey' für die jeweilige exchange
+    'secret': exchangesAPI['secret'],   #ExchangeAPI.json verwenden oder einfach 'secret': 'deinSecret' für die jeweilige exchange
+    'enableRateLimit': False,
+})
+
+#pairs filtern
+#####################################################################################################################
+
+exchange.load_markets()
+allSymbols = exchange.symbols
+symbols = dict()
+
+for i in range(len(allSymbols)):  #alle pairs mit USD filtern
+    if 'USD' in allSymbols[i] and not 'USDT' in allSymbols[i] and not 'SUSD' in allSymbols[i] and not 'CUSD' in allSymbols[i]:   #USDT. SUSD und CUSD ausschließen, sonnst würde es zu Dopplungen kommen
+        symbols[allSymbols[i].split('/')[0]] = 0
+
+
+for key in symbols.keys():  #alle nach allen pairs von coins suchen die ein USD pair haben und in einem dict speichern
+    symbArry = []
+    for allSymb in allSymbols:
+        if key in allSymb and allSymb not in symbArry:
+            if '3L' not in allSymb and '3S' not in allSymb and '5L' not in allSymb and '5S' not in allSymb:   #Coin3L, Coin3S und Coin5L ausschließen weil das komische Märkte sind
+                symbArry.append(allSymb)
+    symbols[key] = symbArry
+
+#Arbitrage Möglichkeiten finden
+#####################################################################################################################
+
+def checkeArbiMoeglichkeit(alltickers, PairA, PairB, PairC, market_order_gebuehren):   #Dreieck Arbitrage hat 2-Richtungen und hier kann man für beide checken ob eine Arbitrage Möglichkeit existiert
+    try:
+        # Fall1
+        gebuehren = (float(alltickers[PairC]['bid']) + float(alltickers[PairB]['ask']) + float(alltickers[PairA]['ask'])) * market_order_gebuehren   #Gebührenkosten für alle notwendigen Trades berechnen
+        umsatz1 = float(alltickers[PairA]['ask'])*float(alltickers[PairB]['ask'])
+        kosten1 = float(alltickers[PairC]['bid']) + gebuehren
+        if umsatz1 > kosten1:
+            welcherFallFunkioniert = 1
+
+        # Fall2
+        gebuehren = (float(alltickers[PairC]['ask']) + float(alltickers[PairB]['bid']) + float(alltickers[PairA]['bid'])) * market_order_gebuehren   #Gebührenkosten für alle notwendigen Trades berechnen
+        umsatz2 = float(alltickers[PairC]['ask']) / float(alltickers[PairB]['bid'])
+        kosten2 = float(alltickers[PairA]['bid']) + gebuehren
+        if umsatz2 > kosten2:
+            welcherFallFunkioniert = 2
+
+        if welcherFallFunkioniert != 1 or welcherFallFunkioniert != 2:
+            welcherFallFunkioniert = 0
+            print(str(umsatz1) + " >= " + str(kosten1) + "    " + str(umsatz2) + " >= " + str(kosten2))
+    except Exception:
+        welcherFallFunkioniert = 0
+        print(traceback.format_exc())
+
+    return welcherFallFunkioniert
+
+
+nichtGekauft = True
+while nichtGekauft:  #Bot läuft solange bis er einmal was kauft
+    for mainCoin in symbols:  #für die ganzen pairs checken ob eine arbitrage möglichkeit besteht
+        if len(mainCoin) >= 2:
+            i=0
+            zweiPairs = []
+            try:
+                while i<2:
+                    zweiPairs.append(symbols[mainCoin][i])  #Zwei Pairs aus den vielen Pairs raussuchen
+                    i=i+1
+            except Exception:
+                print(traceback.format_exc())
+
+            try:
+                alltickers = exchange.fetch_tickers()   #Man glaubt gar nicht wie oft diese Scheisse hier einen Error ausspuckt
+            except Exception:
+                print(traceback.format_exc())
+
+            try: # Pair A-C die richtigen Märkte zuordnen und so splitten, dass der Markt existiert. Bsp.: USDT/USD existiert aber USD/USDT natürlich nicht
+                PairA = zweiPairs[0]
+                PairB = zweiPairs.append(zweiPairs[0].split("/")[1] + "/" + zweiPairs[1].split("/")[1])
+                PairC = zweiPairs[1]
+                gefundenerFall = checkeArbiMoeglichkeit(alltickers, zweiPairs[0], zweiPairs[2], zweiPairs[1], market_order_gebuehren)
+            except:
+                try:
+                    PairA = zweiPairs[0]
+                    PairB = zweiPairs.append(zweiPairs[1].split("/")[1] + "/" + zweiPairs[0].split("/")[1])
+                    PairC = zweiPairs[1]
+                except:
+                    PairA = "USDT/USD"
+                    PairB = "USDT/USD"
+                    PairC = "USDT/USD"
+                zweiPairs.append(zweiPairs[1].split("/")[1] + "/" + zweiPairs[0].split("/")[1])
+                gefundenerFall = checkeArbiMoeglichkeit(alltickers, zweiPairs[0], zweiPairs[2], zweiPairs[1], market_order_gebuehren)
+
+            if gefundenerFall == 1:
+                print(exchange.create_limit_sell_order(PairC, exchange.amount_to_precision(PairC, tradingBalance), float(alltickers[PairC]['bid'])))
+
+                amountPairB = exchange.amount_to_precision(PairB, tradingBalance/float(alltickers[PairC]['bid']))
+                print(exchange.create_limit_buy_order(PairB, amountPairB, float(alltickers[PairB]['ask'])))
+
+                amountPairA = exchange.amount_to_precision(PairA, tradingBalance/float(alltickers[PairC]['bid'])*float(alltickers[PairB]['ask']))
+                print(exchange.create_limit_buy_order(PairA, amountPairA, float(alltickers[PairA]['ask'])))
+                nichtGekauft = False
+
+            if gefundenerFall == 2:
+                print(exchange.create_limit_sell_order(PairA, exchange.amount_to_precision(PairA, tradingBalance), float(alltickers[PairA]['bid'])))
+
+                amountPairB = exchange.amount_to_precision(PairB, tradingBalance/float(alltickers[PairA]['bid']))
+                print(exchange.create_limit_sell_order(PairB, amountPairB, float(alltickers[PairB]['bid'])))
+
+                amountPairC = exchange.amount_to_precision(PairC, tradingBalance/float(alltickers[PairA]['bid'])/float(alltickers[PairB]['bid']))
+                print(exchange.create_limit_buy_order(PairC, amountPairC, float(alltickers[PairC]['ask'])))
+                nichtGekauft = False
